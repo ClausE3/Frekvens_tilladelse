@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="da">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Frekvenstilladelser</title>
+  <style>
+    :root { color-scheme: light; font-family: Arial, sans-serif; color: #172033; background: #f4f7fb; }
+    body { margin: 0; } main { width: 100%; box-sizing: border-box; padding: 28px 20px; } h1, h2 { margin: 0 0 8px; } h2 { margin-top: 28px; font-size: 20px; } p { color: #526174; }
+    .panel { display: flex; gap: 12px; align-items: end; flex-wrap: wrap; padding: 20px; background: #fff; border-radius: 10px; box-shadow: 0 1px 4px #17203318; }
+    label { display: grid; gap: 5px; font-size: 13px; font-weight: bold; } input[type=file] { max-width: 100%; } button, .download { padding: 10px 16px; border: 0; border-radius: 6px; background: #0969da; color: #fff; font-weight: bold; cursor: pointer; text-decoration: none; }
+    button:disabled { background: #8ba8c7; cursor: wait; } #export { background: #1a7f37; } #search { padding: 9px 12px; min-width: 260px; border: 1px solid #bcc7d6; border-radius: 6px; }
+    #message { min-height: 22px; margin: 16px 0; font-weight: bold; } .error { color: #b42318; } .success { color: #1a7f37; } .table-wrap { overflow: auto; background: #fff; border-radius: 10px; box-shadow: 0 1px 4px #17203318; }
+    table { width: 100%; border-collapse: collapse; white-space: nowrap; font-size: 13px; } th { background: #eaf2fc; text-align: left; position: sticky; top: 0; }     th, td { padding: 10px; border-bottom: 1px solid #e5eaf0; } tr:hover { background: #f7fbff; } tr.clickable { cursor: pointer; } tr.clickable:hover { background: #dbeeff; }
+    .hint { font-size: 13px; } .results { display: grid; grid-template-columns: 1fr; gap: 20px; } .results h2 { margin-top: 0; } #stored-permits { margin: 12px 0; color: #526174; } .pdf-link { color: #0969da; font-weight: bold; } dialog { width: min(1100px, calc(100% - 40px)); border: 0; border-radius: 10px; box-shadow: 0 8px 30px #17203355; padding: 24px; } dialog::backdrop { background: #17203388; } dialog h2 { margin-top: 0; } .dialog-actions { display: flex; justify-content: end; margin-top: 16px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Frekvenstilladelser</h1>
+    <p>Gem den seneste PDF for hver tilladelse, og kontrollér den mod ATOLL API.</p>
+    <div class="panel">
+      <label>Tilladelses-PDF'er<input id="pdf" type="file" accept="application/pdf,.pdf" multiple></label>
+      <button id="save-permits">Gem eller opdatér tilladelser</button>
+    </div>
+    <section>
+      <h2>Gemte tilladelser</h2>
+      <div class="table-wrap"><table id="stored-permits"><thead></thead><tbody><tr><td>Indlæser gemte tilladelser...</td></tr></tbody></table></div>
+    </section>
+    <div class="panel">
+      <button id="compare">Kontrollér ATOLL API (DK)</button>
+      <input id="search" type="search" placeholder="Filtrér tilladelser..." disabled>
+      <button id="export" disabled>Download CSV</button>
+    </div>
+    <div id="message" aria-live="polite"></div>
+    <details id="permit-details" hidden>
+      <summary>Vis alle tilladelsesrækker</summary>
+      <div class="table-wrap"><table id="permit-table"><thead></thead><tbody></tbody></table></div>
+    </details>
+    <p class="hint">En PDF erstatter kun en eksisterende tilladelse med samme nummer, når dens øverste `Dato` er nyere. PDF'er med samme eller ældre dato bevarer den gemte version. ATOLL sammenlignes med `Tilladelsesnummer-Positionnummer-Frekvensnummer` i `1st Name` eller `2nd Name`.</p>
+    <section class="results" id="comparison" hidden>
+      <div>
+        <h2>Live eller planlagte links uden matchende tilladelse</h2>
+        <p class="hint">Klik på en række for at se kandidater med match på de første seks tegn i begge SiteID'er.</p>
+        <div class="table-wrap"><table id="missing-table"></table></div>
+      </div>
+      <div><h2>Live eller planlagte links med forkert frekvens</h2><div class="table-wrap"><table id="frequency-table"></table></div></div>
+      <div>
+        <h2>Tilladelser på udfasede links</h2>
+        <input id="retired-search" type="search" placeholder="Filtrér på tilladelsesnummer...">
+        <div class="table-wrap"><table id="retired-table"></table></div>
+      </div>
+    </section>
+    <dialog id="candidate-dialog">
+      <h2 id="candidate-title">Tilladelseskandidater</h2>
+      <div class="table-wrap"><table id="candidate-table"></table></div>
+      <div class="dialog-actions"><button id="close-candidates">Luk</button></div>
+    </dialog>
+  </main>
+  <script>
+    const columns = ["Navn", "Tilladelsesnummer", "Positionnummer", "Frekvensnummer", "Beregnet sende centerfrekvens", "Beregnet modtage centerfrekvens", "Båndbredde vilkår", "Frekvensstatus", "Frek. gyldig fra", "Frek. tilbagekaldt", "Kundenummer", "SiteID"];
+    let rows = []; let missingRows = []; let retiredRows = []; const checkedLinks = new Set(); const $ = (selector) => document.querySelector(selector);
+    const escapeHtml = (value = "") => String(value).replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
+    async function request(url, optionsOrFormData) { const options = optionsOrFormData instanceof FormData ? { method: "POST", body: optionsOrFormData } : (optionsOrFormData || {}); const response = await fetch(url, options); const data = await response.json(); if (!response.ok) throw new Error(data.error || "Serveren kunne ikke behandle filerne."); return data; }
+    function setMessage(message, error = false) { $("#message").className = error ? "error" : "success"; $("#message").textContent = message; }
+    const checkedLinkKey = (row) => `checked-atoll-link:${row["ATOLL link"]}`;
+    const checkedCell = (row) => `<td><input class="checked-link" type="checkbox" data-key="${escapeHtml(checkedLinkKey(row))}" aria-label="Markér ${escapeHtml(row["ATOLL link"])} som kontrolleret"${checkedLinks.has(checkedLinkKey(row)) ? " checked" : ""}></td>`;
+    function renderTable(table, data, tableColumns, checkable = false) { const columns = checkable ? ["Kontrolleret", ...tableColumns] : tableColumns; table.innerHTML = `<thead><tr>${columns.map((column) => `<th>${escapeHtml(column)}</th>`).join("")}</tr></thead><tbody>${data.map((row) => `<tr>${checkable ? checkedCell(row) : ""}${tableColumns.map((column) => `<td>${escapeHtml(row[column])}</td>`).join("")}</tr>`).join("")}</tbody>`; }
+    function renderStored(documents) {
+      const columns = ["ID", "Frekvensbånd", "Type", "Dokumentdato", "Kilde", "Rækker", "Handling"];
+      $("#stored-permits").innerHTML = `<thead><tr>${columns.map((column) => `<th>${escapeHtml(column)}</th>`).join("")}</tr></thead><tbody>${documents.length ? documents.map((document) => `<tr><td>${escapeHtml(document.permitNumber)}</td><td>${escapeHtml(document.frequencyBand)}</td><td>${escapeHtml(document.type)}</td><td>${escapeHtml(document.documentDate)}</td><td>${escapeHtml(document.sourceFilename)}</td><td>${escapeHtml(document.rows)}</td><td><a class="pdf-link" href="/api/permits/${encodeURIComponent(document.permitNumber)}/pdf" target="_blank" rel="noopener">Åbn PDF</a> <button class="delete-permit" data-permit="${escapeHtml(document.permitNumber)}">Slet</button></td></tr>`).join("") : `<tr><td colspan="${columns.length}">Ingen tilladelses-PDF'er er gemt endnu.</td></tr>`}</tbody>`;
+    }
+    function render() { const term = $("#search").value.trim().toLowerCase(); const visible = rows.filter((row) => columns.some((column) => row[column].toLowerCase().includes(term))); renderTable($("#permit-table"), visible, columns); $("#permit-details").hidden = false; setMessage(`${visible.length} af ${rows.length} tilladelsesrækker vises.`); }
+    function renderMissingTable(data) {
+      missingRows = data;
+      const columns = ["ATOLL link", "Link status", "Site A", "Site B", "1st Name", "2nd Name"];
+      $("#missing-table").innerHTML = `<thead><tr><th>Kontrolleret</th>${columns.map((column) => `<th>${escapeHtml(column)}</th>`).join("")}</tr></thead><tbody>${data.map((row, index) => `<tr class="clickable" data-index="${index}">${checkedCell(row)}${columns.map((column) => `<td>${escapeHtml(row[column])}</td>`).join("")}</tr>`).join("")}</tbody>`;
+    }
+    function renderRetiredTable() { const term = $("#retired-search").value.trim().toLowerCase(); const visible = retiredRows.filter((row) => row["Tilladelsesnummer"].toLowerCase().includes(term)); renderTable($("#retired-table"), visible, ["Tilladelsesnummer", "Positionnummer", "Site A / B", "Tilladelsesfrekvens", "Båndbredde", "ATOLL link", "Link status", "Matched permit name"], true); }
+    function renderComparison(data) { renderMissingTable(data.missingActive); renderTable($("#frequency-table"), data.incorrectFrequency, ["ATOLL link", "Link status", "Matched permit name", "ATOLL Frequency A", "ATOLL Frequency B", "Permit frequency"], true); retiredRows = data.permitsOnRetiredLinks; $("#retired-search").value = ""; renderRetiredTable(); $("#comparison").hidden = false; }
+    $("#save-permits").addEventListener("click", async () => {
+      const files = $("#pdf").files; if (!files.length) { setMessage("Vælg mindst én tilladelses-PDF.", true); return; }
+      const button = $("#save-permits"); button.disabled = true; button.textContent = "Gemmer...";
+      try { const formData = new FormData(); [...files].forEach((file) => formData.append("file", file)); const data = await request("/api/permits", formData); renderStored(data.documents); const saved = data.saved.filter((permit) => permit.status === "saved"); const skipped = data.saved.filter((permit) => permit.status === "skipped"); setMessage(`${saved.length ? `${saved.map((permit) => `${permit.permitNumber} (${permit.documentDate})`).join(", ")} gemt.` : ""}${saved.length && skipped.length ? " " : ""}${skipped.length ? `${skipped.map((permit) => `${permit.permitNumber} beholdt (${permit.documentDate} er samme eller nyere)`).join(", ")}.` : ""}`); }
+      catch (error) { setMessage(`Upload fejlede: ${error.message}`, true); } finally { button.disabled = false; button.textContent = "Gem eller opdatér tilladelser"; }
+    });
+    $("#compare").addEventListener("click", async () => {
+      const button = $("#compare"); button.disabled = true; button.textContent = "Henter ATOLL...";
+      try { const data = await request("/api/compare/atoll"); checkedLinks.clear(); rows = data.rows; $("#search").disabled = false; $("#export").disabled = false; renderStored(data.documents); render(); renderComparison(data); setMessage(`${data.atollLinks} danske ATOLL-links blev kontrolleret.`); }
+      catch (error) { setMessage(`Kontrol fejlede: ${error.message}`, true); } finally { button.disabled = false; button.textContent = "Kontrollér ATOLL API (DK)"; }
+    });
+    $("#search").addEventListener("input", render);
+    $("#retired-search").addEventListener("input", renderRetiredTable);
+    $("#missing-table").addEventListener("click", (event) => {
+      if (event.target.matches(".checked-link")) return;
+      const row = event.target.closest("tr.clickable"); if (!row) return;
+      const missing = missingRows[Number(row.dataset.index)];
+      const candidates = missing.candidates || [];
+      const candidateColumns = ["Tilladelses-ID", "Type", "Matchende sites", "Polarisation", "Tilladelsesfrekvenser", "Båndbredde", "Sammenligning"];
+      $("#candidate-title").textContent = `Tilladelseskandidater: ${missing["ATOLL link"]}`;
+      $("#candidate-table").innerHTML = candidates.length
+        ? `<thead><tr>${candidateColumns.map((column) => `<th>${escapeHtml(column)}</th>`).join("")}</tr></thead><tbody>${candidates.map((candidate) => `<tr>${candidateColumns.map((column) => `<td>${escapeHtml(candidate[column])}</td>`).join("")}</tr>`).join("")}</tbody>`
+        : `<tbody><tr><td>Ingen frekvensbaserede tilladelseskandidater blev fundet.</td></tr></tbody>`;
+      $("#candidate-dialog").showModal();
+    });
+    document.addEventListener("change", (event) => {
+      if (event.target.matches(".checked-link")) {
+        if (event.target.checked) checkedLinks.add(event.target.dataset.key);
+        else checkedLinks.delete(event.target.dataset.key);
+      }
+    });
+    $("#close-candidates").addEventListener("click", () => $("#candidate-dialog").close());
+    $("#stored-permits").addEventListener("click", async (event) => {
+      const button = event.target.closest(".delete-permit"); if (!button) return;
+      const permitNumber = button.dataset.permit;
+      if (!confirm(`Slet ${permitNumber} og den gemte PDF?`)) return;
+      button.disabled = true;
+      try { const data = await request(`/api/permits/${encodeURIComponent(permitNumber)}`, { method: "DELETE" }); renderStored(data.documents); setMessage(`${permitNumber} er slettet.`); }
+      catch (error) { setMessage(`Sletning fejlede: ${error.message}`, true); button.disabled = false; }
+    });
+    $("#export").addEventListener("click", () => { const quote = (value) => `"${value.replaceAll('"', '""')}"`; const csv = [columns, ...rows.map((row) => columns.map((column) => row[column]))].map((line) => line.map(quote).join(";")).join("\r\n"); const link = Object.assign(document.createElement("a"), { href: URL.createObjectURL(new Blob(["\ufeff", csv], { type: "text/csv;charset=utf-8" })), download: "frekvenstilladelser.csv" }); link.click(); URL.revokeObjectURL(link.href); });
+    request("/api/permits").then((data) => renderStored(data.documents)).catch((error) => setMessage(`Kunne ikke hente gemte tilladelser: ${error.message}`, true));
+  </script>
+</body>
+</html>
