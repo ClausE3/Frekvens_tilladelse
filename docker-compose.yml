@@ -1,6 +1,8 @@
 services:
   frekvens-tilladelse:
     build: .
+    image: frekvens
+    container_name: frekvens
     restart: unless-stopped
     ports:
       - "8000:8000"
