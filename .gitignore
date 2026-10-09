@@ -2,5 +2,6 @@ __pycache__/
 data/
 ATOLL_API_credentials.md
 ATOLL_API_assets/
-sample_files/
+sample_files/*
 .env
+!sample_files/export_config.cfg
