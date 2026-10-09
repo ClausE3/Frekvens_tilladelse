@@ -68,7 +68,7 @@
     function renderTable(table, data, tableColumns, checkable = false) { const columns = checkable ? ["Kontrolleret", ...tableColumns] : tableColumns; table.innerHTML = `<thead><tr>${columns.map((column) => `<th>${escapeHtml(column)}</th>`).join("")}</tr></thead><tbody>${data.map((row) => `<tr>${checkable ? checkedCell(row) : ""}${tableColumns.map((column) => `<td>${escapeHtml(row[column])}</td>`).join("")}</tr>`).join("")}</tbody>`; }
     function renderStored(documents) {
       const columns = ["ID", "Frekvensbånd", "Type", "Dokumentdato", "Kilde", "Rækker", "Handling"];
-      $("#stored-permits").innerHTML = `<thead><tr>${columns.map((column) => `<th>${escapeHtml(column)}</th>`).join("")}</tr></thead><tbody>${documents.length ? documents.map((document) => `<tr><td>${escapeHtml(document.permitNumber)}</td><td>${escapeHtml(document.frequencyBand)}</td><td>${escapeHtml(document.type)}</td><td>${escapeHtml(document.documentDate)}</td><td>${escapeHtml(document.sourceFilename)}</td><td>${escapeHtml(document.rows)}</td><td><a class="pdf-link" href="/api/permits/${encodeURIComponent(document.permitNumber)}/pdf" target="_blank" rel="noopener">Åbn PDF</a> <button class="delete-permit" data-permit="${escapeHtml(document.permitNumber)}">Slet</button></td></tr>`).join("") : `<tr><td colspan="${columns.length}">Ingen tilladelses-PDF'er er gemt endnu.</td></tr>`}</tbody>`;
+      $("#stored-permits").innerHTML = `<thead><tr>${columns.map((column) => `<th>${escapeHtml(column)}</th>`).join("")}</tr></thead><tbody>${documents.length ? documents.map((document) => `<tr><td>${escapeHtml(document.permitNumber)}</td><td>${escapeHtml(document.frequencyBand)}</td><td>${escapeHtml(document.type)}</td><td>${escapeHtml(document.documentDate)}</td><td>${escapeHtml(document.sourceFilename)}</td><td>${escapeHtml(document.rows)}</td><td><a class="pdf-link" href="api/permits/${encodeURIComponent(document.permitNumber)}/pdf" target="_blank" rel="noopener">Åbn PDF</a> <button class="delete-permit" data-permit="${escapeHtml(document.permitNumber)}">Slet</button></td></tr>`).join("") : `<tr><td colspan="${columns.length}">Ingen tilladelses-PDF'er er gemt endnu.</td></tr>`}</tbody>`;
     }
     function render() { const term = $("#search").value.trim().toLowerCase(); const visible = rows.filter((row) => columns.some((column) => row[column].toLowerCase().includes(term))); renderTable($("#permit-table"), visible, columns); $("#permit-details").hidden = false; setMessage(`${visible.length} af ${rows.length} tilladelsesrækker vises.`); }
     function renderMissingTable(data) {
@@ -81,12 +81,12 @@
     $("#save-permits").addEventListener("click", async () => {
       const files = $("#pdf").files; if (!files.length) { setMessage("Vælg mindst én tilladelses-PDF.", true); return; }
       const button = $("#save-permits"); button.disabled = true; button.textContent = "Gemmer...";
-      try { const formData = new FormData(); [...files].forEach((file) => formData.append("file", file)); const data = await request("/api/permits", formData); renderStored(data.documents); const saved = data.saved.filter((permit) => permit.status === "saved"); const skipped = data.saved.filter((permit) => permit.status === "skipped"); setMessage(`${saved.length ? `${saved.map((permit) => `${permit.permitNumber} (${permit.documentDate})`).join(", ")} gemt.` : ""}${saved.length && skipped.length ? " " : ""}${skipped.length ? `${skipped.map((permit) => `${permit.permitNumber} beholdt (${permit.documentDate} er samme eller nyere)`).join(", ")}.` : ""}`); }
+      try { const formData = new FormData(); [...files].forEach((file) => formData.append("file", file)); const data = await request("api/permits", formData); renderStored(data.documents); const saved = data.saved.filter((permit) => permit.status === "saved"); const skipped = data.saved.filter((permit) => permit.status === "skipped"); setMessage(`${saved.length ? `${saved.map((permit) => `${permit.permitNumber} (${permit.documentDate})`).join(", ")} gemt.` : ""}${saved.length && skipped.length ? " " : ""}${skipped.length ? `${skipped.map((permit) => `${permit.permitNumber} beholdt (${permit.documentDate} er samme eller nyere)`).join(", ")}.` : ""}`); }
       catch (error) { setMessage(`Upload fejlede: ${error.message}`, true); } finally { button.disabled = false; button.textContent = "Gem eller opdatér tilladelser"; }
     });
     $("#compare").addEventListener("click", async () => {
       const button = $("#compare"); button.disabled = true; button.textContent = "Henter ATOLL...";
-      try { const data = await request("/api/compare/atoll"); checkedLinks.clear(); rows = data.rows; $("#search").disabled = false; $("#export").disabled = false; renderStored(data.documents); render(); renderComparison(data); setMessage(`${data.atollLinks} danske ATOLL-links blev kontrolleret.`); }
+      try { const data = await request("api/compare/atoll"); checkedLinks.clear(); rows = data.rows; $("#search").disabled = false; $("#export").disabled = false; renderStored(data.documents); render(); renderComparison(data); setMessage(`${data.atollLinks} danske ATOLL-links blev kontrolleret.`); }
       catch (error) { setMessage(`Kontrol fejlede: ${error.message}`, true); } finally { button.disabled = false; button.textContent = "Kontrollér ATOLL API (DK)"; }
     });
     $("#search").addEventListener("input", render);
@@ -115,11 +115,11 @@
       const permitNumber = button.dataset.permit;
       if (!confirm(`Slet ${permitNumber} og den gemte PDF?`)) return;
       button.disabled = true;
-      try { const data = await request(`/api/permits/${encodeURIComponent(permitNumber)}`, { method: "DELETE" }); renderStored(data.documents); setMessage(`${permitNumber} er slettet.`); }
+      try { const data = await request(`api/permits/${encodeURIComponent(permitNumber)}`, { method: "DELETE" }); renderStored(data.documents); setMessage(`${permitNumber} er slettet.`); }
       catch (error) { setMessage(`Sletning fejlede: ${error.message}`, true); button.disabled = false; }
     });
     $("#export").addEventListener("click", () => { const quote = (value) => `"${value.replaceAll('"', '""')}"`; const csv = [columns, ...rows.map((row) => columns.map((column) => row[column]))].map((line) => line.map(quote).join(";")).join("\r\n"); const link = Object.assign(document.createElement("a"), { href: URL.createObjectURL(new Blob(["\ufeff", csv], { type: "text/csv;charset=utf-8" })), download: "frekvenstilladelser.csv" }); link.click(); URL.revokeObjectURL(link.href); });
-    request("/api/permits").then((data) => renderStored(data.documents)).catch((error) => setMessage(`Kunne ikke hente gemte tilladelser: ${error.message}`, true));
+    request("api/permits").then((data) => renderStored(data.documents)).catch((error) => setMessage(`Kunne ikke hente gemte tilladelser: ${error.message}`, true));
   </script>
 </body>
 </html>
