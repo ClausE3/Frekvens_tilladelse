@@ -20,8 +20,8 @@ from urllib.request import Request, urlopen
 from pypdf import PdfReader
 
 
-HOST = "127.0.0.1"
-PORT = 8000
+HOST = os.environ.get("APP_HOST", "127.0.0.1")
+PORT = int(os.environ.get("APP_PORT", "8000"))
 MAX_UPLOAD_BYTES = 25 * 1024 * 1024
 SITE_ID_PATTERN = r"[A-Z]{1,2}\d{4}[A-Z]?"
 PERMIT_STORAGE_DIR = Path(__file__).parent / "data" / "permits"
@@ -31,6 +31,7 @@ ATOLL_API_COUNTRY = "DK"
 ATOLL_API_PAGE_SIZE = 1000
 MAX_ATOLL_API_PAGES = 1_000
 ACTIVE_LINK_STATUSES = {"In service", "Live", "Planned"}
+MISSING_PERMIT_LINK_STATUSES = {"In service", "Planned"}
 RETIRED_LINK_STATUSES = {
     "Dismantled",
     "Out of service",
@@ -279,7 +280,7 @@ def atoll_api_row(item: dict[str, Any]) -> dict[str, str]:
         raise ValueError(f"ATOLL API-svaret mangler: {', '.join(missing_fields)}.")
     return {
         "Name": str(item["name"]),
-        "Link Status": str(item.get("link_status") or ""),
+        "Link Status": str(item.get("atoll_link_status") or ""),
         "1st Name": str(item.get("name_1") or ""),
         "2nd Name": str(item.get("name_2") or ""),
         "Site A": str(item["site_a"]),
@@ -816,7 +817,7 @@ def compare_permits(
             key for key in matched if permits[key].get("_flatPermit") != "true"
         )
 
-        if status in ACTIVE_LINK_STATUSES and not matched:
+        if status in MISSING_PERMIT_LINK_STATUSES and not matched:
             missing_active.append(
                 {
                     "ATOLL link": (row.get("Name") or "").strip(),

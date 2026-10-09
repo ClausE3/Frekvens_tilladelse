@@ -3,3 +3,4 @@ data/
 ATOLL_API_credentials.md
 ATOLL_API_assets/
 sample_files/
+.env

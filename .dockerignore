@@ -1,0 +1,10 @@
+.git
+__pycache__/
+data/
+ATOLL_API_credentials.md
+ATOLL_API_assets/
+ATOLL_API_readme.md
+ATOLL_data_used.md
+sample_files/*
+!sample_files/export_config.cfg
+.env
