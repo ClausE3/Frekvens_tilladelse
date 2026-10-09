@@ -4,13 +4,21 @@ services:
     image: frekvens_tilladelse
     container_name: Frekvens_tilladelse
     restart: unless-stopped
-    ports:
-      - "8000:8000"
+    expose:
+      - "8000"
+    networks:
+      proxy:
+        aliases:
+          - frekvens
     environment:
       ATOLL_CLIENT_ID: ${ATOLL_CLIENT_ID:?sæt ATOLL_CLIENT_ID i .env}
       ATOLL_CLIENT_SECRET: ${ATOLL_CLIENT_SECRET:?sæt ATOLL_CLIENT_SECRET i .env}
     volumes:
       - permit-data:/app/data
+
+networks:
+  proxy:
+    external: true
 
 volumes:
   permit-data:
